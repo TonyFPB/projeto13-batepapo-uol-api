@@ -2,11 +2,16 @@ import express from "express"
 import cors from "cors"
 import { MongoClient } from "mongodb"
 import dayjs from "dayjs"
-import joi from "joi"
+import Joi from "joi"
 import dotenv from "dotenv"
 
-const userScheme = joi.object({
-    name: joi.string().min(1).trim().required()
+const userScheme = Joi.object({
+    name: Joi.string().min(1).trim(true).required()
+})
+const messageScheme = Joi.object({
+    to: Joi.string().min(1).trim().required(),
+    text: Joi.string().min(1).trim().required(),
+    type: Joi.string().valid("message", "private_message").required()
 })
 
 dotenv.config()
@@ -28,10 +33,10 @@ try {
     console.log(err)
 }
 
+const time = () => dayjs().format("HH:mm:ss")
 //participants
 app.post("/participants", async (req, res) => {
     const user = req.body
-    const time = dayjs().format("HH:mm:ss")
 
     try {
         const validationName = userScheme.validate(user, { abortEarly: false })
@@ -40,13 +45,14 @@ app.post("/participants", async (req, res) => {
             return res.status(422).send({ message: errors })
         }
 
-        const userExists = await participants.findOne({ name: user.name })
+        const name = validationName.value.name
+        const userExists = await participants.findOne({ name })
         if (userExists) {
             return res.status(409).send({ message: "Usuário ja existente!" })
         }
-        // {from: 'xxx', to: 'Todos', text: 'entra na sala...', type: 'status', time: 'HH:MM:SS'}
-        const newUser = { name: user.name, lastStatus: Date.now() }
-        const newMessage = {from: user.name, to: 'Todos', text: 'entra na sala...', type: 'status', time: time}
+
+        const newUser = { name, lastStatus: Date.now() }
+        const newMessage = { from: name, to: 'Todos', text: 'entra na sala...', type: 'status', "time": time() }
         await participants.insertOne(newUser)
         await messages.insertOne(newMessage)
         res.sendStatus(201)
@@ -55,14 +61,59 @@ app.post("/participants", async (req, res) => {
         console.log(err)
     }
 })
+
 app.get("/participants", async (req, res) => {
     try {
         const toSend = await participants.find().toArray()
-        res.send(toSend)
+        res.send(toSend.map(u => { return { "name": u.name } }))
     } catch (err) {
         res.sendStatus(500)
     }
 })
 
+app.post("/status", async (req, res) => {
+    const username = req.headers.user
+    try {
+        const userExists = await participants.findOne({ "name": username })
+        if (!userExists) {
+            return res.sendStatus(404)
+        }
+        await participants.updateOne({ name: username }, { "$set": { lastStatus: Date.now() } })
+        res.sendStatus(200)
+    } catch (err) {
+        console.log(err)
+        res.sendStatus(500)
+    }
+})
+
+//messages
+app.post("/messages", async (req, res) => {
+    const username = req.headers.user
+    const message = req.body
+    
+    try {
+        const messageValidate = messageScheme.validate(message, { abortEarly: false })
+        if (messageValidate.error) {
+            const errors = messageValidate.error.details.map(d => d.message)
+            return res.status(422).send({ "message": errors })
+        }
+
+        const userExists = await participants.findOne({ "name": username })
+        if (!userExists) {
+            return res.status(422).send({ "message": "Usuario nao esta logado" })
+        }
+
+        const newMessage = { "from": username, ...messageValidate.value, "time": time() }
+        await messages.insertOne(newMessage)
+        res.sendStatus(201)
+    } catch (err) {
+        console.log(err)
+        res.sendStatus(500)
+    }
+})
+app.get("/messages",async(req,res)=>{
+    const toSend = await messages.find({}).toArray()
+    res.send(toSend)
+})
 
 app.listen(5000, () => console.log("Server running in port 5000"))
