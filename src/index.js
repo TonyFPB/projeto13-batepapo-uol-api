@@ -122,9 +122,9 @@ app.get("/messages", async (req, res) => {
         const allMessages = await messagesCollection.find({}).toArray()
         const userMessages = allMessages.filter(m => m.to === name || m.from === name || m.type === "status" || m.type === "message")
         if (!isNaN(limit)) {
-            return res.send(userMessages.reverse().slice(0, limit))
+            return res.send(userMessages.reverse().slice(0, limit).reverse())
         }
-        res.send(userMessages.reverse())
+        res.send(userMessages)
     } catch (err) {
         console.log(err)
         res.sendStatus(500)
